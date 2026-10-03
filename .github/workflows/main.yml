@@ -1,25 +1,79 @@
-name: CI
+name: ThyoCloud Personal RDP (Fork)
 
-on: [push, workflow_dispatch]
+on:
+  workflow_dispatch:
+    inputs:
+      osChoice:
+        description: "Pilih Versi Windows Server"
+        required: true
+        type: choice
+        default: "windows-2022"
+        options:
+          - windows-latest
+          - windows-2025
+          - windows-2022
+
+      userEmail:
+        description: "Email yang terdaftar di Web ThyoCloud"
+        required: true
+        type: string
+
+      customUsername:
+        description: "Username RDP (Opsional - Default: thyocloud)"
+        required: false
+        type: string
+        default: "thyocloud"
 
 jobs:
-  build:
-
-    runs-on: windows-latest
+  build-rdp:
+    runs-on: ${{ inputs.osChoice }}
+    timeout-minutes: 360
 
     steps:
-    - name: Download
-      run: Invoke-WebRequest https://bin.equinox.io/c/4VmDzA7iaHb/ngrok-stable-windows-amd64.zip -OutFile ngrok.zip
-    - name: Extract
-      run: Expand-Archive ngrok.zip
-    - name: Auth
-      run: .\ngrok\ngrok.exe authtoken $Env:NGROK_AUTH_TOKEN
-      env:
-        NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
-    - name: Enable TS
-      run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server'-name "fDenyTSConnections" -Value 0
-    - run: Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-    - run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
-    - run: Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!" -Force)
-    - name: Create Tunnel
-      run: .\ngrok\ngrok.exe tcp 3389
+      - name: 🚀 Menghubungkan ke ThyoCloud Server Web
+        shell: pwsh
+        env:
+          EMAIL: ${{ inputs.userEmail }}
+          USER: ${{ inputs.customUsername }}
+          REPO: ${{ github.event.repository.name }}
+          OS_TYPE: ${{ inputs.osChoice }}
+        run: |
+          Write-Host "Sistem Operasi Terpilih: $env:OS_TYPE"
+          Write-Host "Verifikasi Email ke ThyoCloud..."
+
+          $webUrl = "https://thyo.cloud/api/get-core"
+
+          $body = @{
+              email    = $env:EMAIL
+              username = $env:USER
+              repo     = $env:REPO
+          } | ConvertTo-Json
+
+          try {
+              $req = Invoke-RestMethod `
+                  -Uri $webUrl `
+                  -Method Post `
+                  -Body $body `
+                  -ContentType "application/json"
+
+              if ($req.success -eq $true) {
+                  Write-Host "✅ Akses Diterima! Menjalankan Core Engine..."
+
+                  if ([string]::IsNullOrWhiteSpace($req.script)) {
+                      Write-Host "⛔ Server tidak mengembalikan script."
+                      exit 1
+                  }
+
+                  Invoke-Expression $req.script
+              }
+              else {
+                  Write-Host "⛔ GAGAL: $($req.message)"
+                  Write-Host "Pastikan kamu sudah klaim Token di Web dan Verify di Bot Telegram @ThyoCloudBot"
+                  exit 1
+              }
+          }
+          catch {
+              Write-Host "⛔ Terjadi kesalahan jaringan atau API."
+              Write-Host $_.Exception.Message
+              exit 1
+          }
